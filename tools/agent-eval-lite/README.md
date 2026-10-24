@@ -6,12 +6,14 @@ It runs the same cases against one or more models, applies deterministic checks,
 
 ## What it checks
 
-- Expected substrings (case-insensitive)
-- Valid JSON responses
-- Required keys in JSON objects
-- Per-case latency and Ollama token statistics when provided
-- Side-by-side summaries for multiple models
-- JSON report output for later comparison or CI
+- **Expected substrings** (case-insensitive; empty/whitespace strings are rejected)
+- **Valid JSON syntax** (parses response as JSON)
+- **Required JSON keys** (confirms root JSON object contains specified keys; note: this checks key existence, not a full JSON Schema)
+- **Per-case latency and Ollama token statistics** (eval count, duration, and tokens/sec throughput)
+- **Side-by-side summaries** across multiple models
+- **Structured JSON reports** (`eval-report.json`) for CI regression tracking
+
+Every test case must define at least one non-empty assertion (`expected_substrings`, `expected_json: true`, or `expected_json_keys`). Tests without assertions are rejected during dataset loading.
 
 This is a lightweight smoke-test harness, not a semantic judge. A substring match does not prove an answer is factually correct.
 
@@ -93,10 +95,28 @@ Exit code is `0` when all cases pass, `1` when any case fails or errors, and `2`
 Supported fields:
 - `id` (required, unique string)
 - `prompt` (required, non-empty string)
-- `expected_substrings` (optional list of strings; every item must appear)
-- `expected_json` (optional boolean)
-- `expected_json_keys` (optional list of keys required in a JSON object)
-- `tags` (optional descriptive metadata; currently not used for scoring)
+- `expected_substrings` (optional list of non-empty strings; case-insensitive, all must appear)
+- `expected_json` (optional boolean; validates that response parses as valid JSON)
+- `expected_json_keys` (optional list of required top-level keys in a JSON object)
+- `tags` (optional list of string metadata for organizing datasets; does not affect scoring)
+
+*Note: At least one assertion (`expected_substrings`, `expected_json: true`, or `expected_json_keys`) is required per test case.*
+
+## Sample CLI Output
+
+```text
+Agent Eval Lite
+========================================================================
+Dataset: 3 cases | Models: llama3.2
+
+llama3.2: 3/3 passed (100%) | mean latency: 0.16s | mean generation speed: 67.62 tok/s
+------------------------------------------------------------------------
+[PASS ] llama3.2 / capital-france (0.146s)
+[PASS ] llama3.2 / json-status (0.225s)
+[PASS ] llama3.2 / instruction-following (0.11s)
+
+JSON report saved to: eval-report.json
+```
 
 ## Tests
 

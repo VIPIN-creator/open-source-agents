@@ -11,6 +11,7 @@ import statistics
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,9 +24,21 @@ def normalize_host(host: str) -> str:
         raise ValueError("Ollama host cannot be empty")
     if "://" not in host:
         host = "http://" + host
-    if not host.startswith(("http://", "https://")):
+
+    parsed = urllib.parse.urlsplit(host)
+    if parsed.scheme not in ("http", "https"):
         raise ValueError("Host must use http:// or https://")
-    return host.rstrip("/")
+    if not parsed.hostname:
+        raise ValueError(f"Invalid host URL (missing hostname): '{host}'")
+
+    try:
+        if parsed.port is not None and not (1 <= parsed.port <= 65535):
+            raise ValueError(f"Port must be between 1 and 65535 in '{host}'")
+    except ValueError as exc:
+        raise ValueError(f"Invalid port in host URL '{host}': {exc}") from None
+
+    netloc = parsed.netloc
+    return f"{parsed.scheme}://{netloc}".rstrip("/")
 
 
 def post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
@@ -79,19 +92,39 @@ def load_dataset(path: str | Path) -> list[dict[str, Any]]:
         expected = case.get("expected_substrings", [])
         if not isinstance(expected, list) or not all(isinstance(x, str) for x in expected):
             raise ValueError(f"Case '{case_id}': expected_substrings must be a list of strings")
+        if any(not x.strip() for x in expected):
+            raise ValueError(f"Case '{case_id}': expected_substrings cannot contain empty or whitespace-only strings")
+
+        has_keys = False
         if "expected_json_keys" in case:
             keys = case["expected_json_keys"]
             if not isinstance(keys, list) or not all(isinstance(x, str) for x in keys):
                 raise ValueError(f"Case '{case_id}': expected_json_keys must be a list of strings")
+            if not keys:
+                raise ValueError(f"Case '{case_id}': expected_json_keys cannot be empty when specified")
+            if any(not x.strip() for x in keys):
+                raise ValueError(f"Case '{case_id}': expected_json_keys cannot contain empty or whitespace-only keys")
+            has_keys = bool(keys)
+
         for flag in ("expected_json",):
             if flag in case and not isinstance(case[flag], bool):
                 raise ValueError(f"Case '{case_id}': {flag} must be true or false")
+
+        has_json = case.get("expected_json", False) is True
+        if not expected and not has_json and not has_keys:
+            raise ValueError(
+                f"Case '{case_id}' defines no assertions. Every case must define at least one: "
+                "a non-empty 'expected_substrings', 'expected_json: true', or 'expected_json_keys'."
+            )
     return raw
 
 
 def check_response(case: dict[str, Any], response: str) -> dict[str, Any]:
     """Apply deterministic checks; this is not a semantic-quality judge."""
     failures: list[str] = []
+    has_assertions = bool(case.get("expected_substrings")) or (case.get("expected_json") is True) or bool(case.get("expected_json_keys"))
+    if not has_assertions:
+        failures.append("case defines no assertions")
     normalized = response.casefold()
 
     missing = [
